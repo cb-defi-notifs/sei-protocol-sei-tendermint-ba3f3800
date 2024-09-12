@@ -246,6 +246,7 @@ func (blockExec *BlockExecutor) ApplyBlock(
 		defer finalizeBlockSpan.End()
 	}
 	txs := block.Data.Txs.ToSliceOfBytes()
+	finalizeBlockStartTime := time.Now()
 	fBlockRes, err := blockExec.appClient.FinalizeBlock(
 		ctx,
 		&abci.RequestFinalizeBlock{
@@ -269,6 +270,7 @@ func (blockExec *BlockExecutor) ApplyBlock(
 			LastResultsHash:       block.LastResultsHash,
 		},
 	)
+	blockExec.metrics.FinalizeBlockLatency.Observe(float64(time.Since(finalizeBlockStartTime).Milliseconds()))
 	if finalizeBlockSpan != nil {
 		finalizeBlockSpan.End()
 	}
@@ -286,7 +288,9 @@ func (blockExec *BlockExecutor) ApplyBlock(
 	)
 
 	// Save the results before we commit.
+	saveBlockResponseTime := time.Now()
 	err = blockExec.store.SaveFinalizeBlockResponses(block.Height, fBlockRes)
+	blockExec.metrics.SaveBlockResponseLatency.Observe(float64(time.Since(saveBlockResponseTime).Milliseconds()))
 	if err != nil && !errors.Is(err, ErrNoFinalizeBlockResponsesForHeight{block.Height}) {
 		// It is correct to have an empty ResponseFinalizeBlock for ApplyBlock,
 		// but not for saving it to the state store
@@ -340,12 +344,14 @@ func (blockExec *BlockExecutor) ApplyBlock(
 	blockExec.evpool.Update(ctx, state, block.Evidence)
 
 	// Update the app hash and save the state.
+	saveBlockTime := time.Now()
 	state.AppHash = fBlockRes.AppHash
 	if err := blockExec.store.Save(state); err != nil {
 		return state, err
 	}
-
+	blockExec.metrics.SaveBlockLatency.Observe(float64(time.Since(saveBlockTime).Milliseconds()))
 	// Prune old heights, if requested by ABCI app.
+	pruneBlockTime := time.Now()
 	if retainHeight > 0 {
 		pruned, err := blockExec.pruneBlocks(retainHeight)
 		if err != nil {
@@ -354,14 +360,15 @@ func (blockExec *BlockExecutor) ApplyBlock(
 			blockExec.logger.Debug("pruned blocks", "pruned", pruned, "retain_height", retainHeight)
 		}
 	}
-
+	blockExec.metrics.PruneBlockLatency.Observe(float64(time.Since(pruneBlockTime).Milliseconds()))
 	// reset the verification cache
 	blockExec.cache = make(map[string]struct{})
 
 	// Events are fired after everything else.
 	// NOTE: if we crash between Commit and Save, events wont be fired during replay
-	fireEvents(blockExec.logger, blockExec.eventBus, block, blockID, fBlockRes, validatorUpdates)
-
+	fireEventsStartTime := time.Now()
+	FireEvents(blockExec.logger, blockExec.eventBus, block, blockID, fBlockRes, validatorUpdates)
+	blockExec.metrics.FireEventsLatency.Observe(float64(time.Since(fireEventsStartTime).Milliseconds()))
 	return state, nil
 }
 
@@ -687,7 +694,7 @@ func (state State) Update(
 // Fire NewBlock, NewBlockHeader.
 // Fire TxEvent for every tx.
 // NOTE: if Tendermint crashes before commit, some or all of these events may be published again.
-func fireEvents(
+func FireEvents(
 	logger log.Logger,
 	eventBus types.BlockEventPublisher,
 	block *types.Block,
@@ -811,7 +818,7 @@ func ExecCommitBlock(
 		}
 
 		blockID := types.BlockID{Hash: block.Hash(), PartSetHeader: bps.Header()}
-		fireEvents(be.logger, be.eventBus, block, blockID, finalizeBlockResponse, validatorUpdates)
+		FireEvents(be.logger, be.eventBus, block, blockID, finalizeBlockResponse, validatorUpdates)
 	}
 
 	// Commit block

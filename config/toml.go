@@ -277,6 +277,9 @@ tls-key-file = "{{ .RPC.TLSKeyFile }}"
 # pprof listen address (https://golang.org/pkg/net/http/pprof)
 pprof-laddr = "{{ .RPC.PprofListenAddress }}"
 
+# timeout for any read request
+timeout-read = "{{ .RPC.TimeoutRead }}"
+
 #######################################################
 ###           P2P Configuration Options             ###
 #######################################################
@@ -404,6 +407,14 @@ tx-notify-threshold = {{ .Mempool.TxNotifyThreshold }}
 check-tx-error-blacklist-enabled = {{ .Mempool.CheckTxErrorBlacklistEnabled }}
 
 check-tx-error-threshold = {{ .Mempool.CheckTxErrorThreshold }}
+
+pending-size = {{ .Mempool.PendingSize }}
+
+max-pending-txs-bytes = {{ .Mempool.MaxPendingTxsBytes }}
+
+pending-ttl-duration = "{{ .Mempool.PendingTTLDuration }}"
+
+pending-ttl-num-blocks = {{ .Mempool.PendingTTLNumBlocks }}
 
 #######################################################
 ###         State Sync Configuration Options        ###
